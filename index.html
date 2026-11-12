@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Free PDF & Word Compressor – files never leave your device</title>
+<meta name="description" content="Shrink PDF and Word (.docx) files for free. Everything runs in your browser, so your files are never uploaded.">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--bg:#f6f7f4;--ink:#16202e;--mute:#5d6877;--line:#d9ddd5;--acc:#1f4fe0;--card:#fff;--ok:#12794a;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#10151d;--ink:#e8ecf2;--mute:#97a1b0;--line:#283140;--acc:#6b8cff;--card:#18202b;--ok:#4cc58a;--bad:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:640px;margin:0 auto;padding:40px 20px 60px}
+h1{font-size:clamp(28px,6vw,40px);line-height:1.15;margin:0 0 10px;letter-spacing:-.02em}
+p.lead{color:var(--mute);margin:0 0 28px}
+#drop{display:block;border:2px dashed var(--line);border-radius:14px;background:var(--card);padding:40px 20px;text-align:center;cursor:pointer}
+#drop:hover,#drop.over,#drop:focus-within{border-color:var(--acc)}
+#drop b{display:block;font-size:18px;margin-bottom:4px}
+#drop span{color:var(--mute);font-size:14px}
+input[type=file]{position:absolute;opacity:0;width:1px;height:1px}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 4px}
+.row label{flex:1 1 150px;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px;cursor:pointer;font-size:14px}
+.row label:has(input:checked){border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
+.row small{display:block;color:var(--mute)}
+.row input{margin-right:6px}
+ul{list-style:none;margin:24px 0 0;padding:0}
+li{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px}
+li .name{font-weight:600;word-break:break-all}
+li .info{color:var(--mute);font-size:14px;margin-top:2px}
+li .bar{height:4px;background:var(--line);border-radius:2px;margin-top:10px;overflow:hidden}
+li .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+.ok{color:var(--ok)}.bad{color:var(--bad)}
+a.dl{display:inline-block;margin-top:10px;background:var(--acc);color:#fff;text-decoration:none;padding:8px 16px;border-radius:8px;font-weight:600;font-size:14px}
+:is(a,label,button):focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+footer{margin-top:40px;color:var(--mute);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<h1>Make PDF and Word files smaller</h1>
+<p class="lead">Free, no sign-up. Your files are processed inside your browser and never uploaded anywhere.</p>
+
+<label id="drop" for="file"><b>Choose files or drop them here</b><span>PDF and Word (.docx)</span></label>
+<input id="file" type="file" accept=".pdf,.docx" multiple>
+
+<div class="row" role="radiogroup" aria-label="Compression level">
+<label><input type="radio" name="lvl" value="low"> Light<small>Best quality</small></label>
+<label><input type="radio" name="lvl" value="med" checked> Balanced<small>Recommended</small></label>
+<label><input type="radio" name="lvl" value="high"> Strong<small>Smallest size</small></label>
+</div>
+
+<ul id="list" aria-live="polite"></ul>
+
+<footer>PDF compression turns each page into a compressed image, so text can no longer be selected in the result. Word compression shrinks the images inside the file and keeps your text editable.</footer>
+</main>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const LV={low:{scale:2,q:.8,max:2000},med:{scale:1.4,q:.6,max:1400},high:{scale:1,q:.45,max:1000}};
+const $=s=>document.querySelector(s),list=$("#list"),drop=$("#drop");
+const fmt=n=>n>1048576?(n/1048576).toFixed(2)+" MB":Math.max(1,Math.round(n/1024))+" KB";
+const level=()=>LV[document.querySelector("input[name=lvl]:checked").value];
+
+$("#file").onchange=e=>{handle(e.target.files);e.target.value=""};
+["dragover","dragenter"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add("over")}));
+["dragleave","drop"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove("over")}));
+drop.addEventListener("drop",e=>handle(e.dataTransfer.files));
+
+async function handle(files){
+  for(const f of files){
+    const li=document.createElement("li");
+    li.innerHTML='<div class="name"></div><div class="info">Starting…</div><div class="bar"><i></i></div>';
+    li.querySelector(".name").textContent=f.name;
+    list.prepend(li);
+    const info=li.querySelector(".info"),bar=li.querySelector("i");
+    const prog=p=>bar.style.width=Math.round(p*100)+"%";
+    try{
+      const ext=f.name.split(".").pop().toLowerCase();
+      let blob;
+      if(ext==="pdf")blob=await doPdf(f,level(),prog,t=>info.textContent=t);
+      else if(ext==="docx")blob=await doDocx(f,level(),prog,t=>info.textContent=t);
+      else throw new Error("Only PDF and .docx files are supported.");
+      prog(1);
+      if(blob.size>=f.size){info.innerHTML='<span class="bad">This file is already well compressed. Try the Strong level.</span>';continue}
+      const saved=Math.round((1-blob.size/f.size)*100);
+      info.innerHTML=fmt(f.size)+" → <b>"+fmt(blob.size)+'</b> <span class="ok">(−'+saved+"%)</span>";
+      const a=document.createElement("a");
+      a.className="dl";a.textContent="Download";
+      a.href=URL.createObjectURL(blob);
+      a.download=f.name.replace(/\.(pdf|docx)$/i,"")+"-compressed."+ext;
+      li.appendChild(a);
+    }catch(err){info.innerHTML='<span class="bad">Could not compress this file: '+(err.message||err)+"</span>"}
+  }
+}
+
+async function doPdf(file,L,prog,say){
+  const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+  const {jsPDF}=window.jspdf;let doc;
+  for(let i=1;i<=pdf.numPages;i++){
+    say("Page "+i+" of "+pdf.numPages);
+    const page=await pdf.getPage(i),base=page.getViewport({scale:1}),vp=page.getViewport({scale:L.scale});
+    const c=document.createElement("canvas");c.width=vp.width;c.height=vp.height;
+    const ctx=c.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);
+    await page.render({canvasContext:ctx,viewport:vp}).promise;
+    const o=base.width>base.height?"l":"p",fmtp=[base.width,base.height];
+    if(!doc)doc=new jsPDF({unit:"pt",format:fmtp,orientation:o,compress:true});else doc.addPage(fmtp,o);
+    doc.addImage(c.toDataURL("image/jpeg",L.q),"JPEG",0,0,base.width,base.height,undefined,"FAST");
+    c.width=c.height=0;prog(i/pdf.numPages);
+  }
+  return doc.output("blob");
+}
+
+function loadImg(blob){return new Promise((res,rej)=>{const u=URL.createObjectURL(blob),im=new Image();im.onload=()=>{URL.revokeObjectURL(u);res(im)};im.onerror=()=>rej(new Error("image"));im.src=u})}
+const toBlob=(c,t,q)=>new Promise(r=>c.toBlob(r,t,q));
+
+async function doDocx(file,L,prog,say){
+  const zip=await JSZip.loadAsync(await file.arrayBuffer());
+  const imgs=Object.keys(zip.files).filter(n=>/^word\/media\/.+\.(jpe?g|png)$/i.test(n));
+  let k=0;
+  for(const n of imgs){
+    say("Image "+(++k)+" of "+imgs.length);
+    try{
+      const orig=await zip.file(n).async("blob"),im=await loadImg(orig);
+      const r=Math.min(1,L.max/Math.max(im.width,im.height));
+      const c=document.createElement("canvas");c.width=Math.round(im.width*r);c.height=Math.round(im.height*r);
+      const png=/\.png$/i.test(n),ctx=c.getContext("2d");
+      if(!png){ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height)}
+      ctx.drawImage(im,0,0,c.width,c.height);
+      const nb=await toBlob(c,png?"image/png":"image/jpeg",L.q);
+      if(nb&&nb.size<orig.size)zip.file(n,nb);
+    }catch(e){/* keep original image */}
+    prog(k/imgs.length*.9);
+  }
+  say("Packing file…");
+  return zip.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:9},mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
+}
+</script>
+</body>
+</html>
